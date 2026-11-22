@@ -14,16 +14,6 @@ except ImportError:
     from hardware_interface import HardwareInterface
 
 
-TRIGGERS = {
-    "FIXATION_ONSET": 10,
-    "PROPOSITION_ONSET": 20,
-    "RESP_BELIEF": 31,
-    "RESP_DISBELIEF": 32,
-    "RESP_SUSPEND": 33,
-    "FEEDBACK_ONSET": 40,
-}
-
-
 def generate_trial_evidence(ambiguity: float, ground_truth: str, rng: np.random.Generator) -> dict:
     n_cues = 10
     signal_prob = 0.5 + 0.45 * (1.0 - ambiguity)
@@ -54,6 +44,12 @@ def score_asymmetric_bet(choice: str, ground_truth: str, stake: int) -> tuple[bo
     return is_correct, payoff
 
 
+def sample_fixation_jitter(rng: np.random.Generator, min_s: float = 2.0, max_s: float = 6.5, mean_s: float = 3.5) -> float:
+    """Truncated exponential inter-trial fixation jitter (2.0-6.5 s) for pCASL/BOLD HRF deconvolution."""
+    val = min_s + rng.exponential(scale=(mean_s - min_s))
+    return float(np.clip(val, min_s, max_s))
+
+
 def run_cli_session(
     subject: str,
     session: str,
@@ -62,6 +58,7 @@ def run_cli_session(
     seed: int = 42,
     config_path: str | None = None,
     wait_for_scanner: bool = False,
+    use_jitter: bool = False,
 ):
     hw = HardwareInterface(config_path=config_path)
     logger = BIDSLogger(out_dir=out_dir, subject=subject, session=session)
@@ -74,7 +71,11 @@ def run_cli_session(
 
     print("=" * 72)
     print(f"TSSM-FCABP PROTOCOL | Subject: {subject} | Session: {session} | Trials: {n_trials}")
-    print(f"Trigger Mode: {hw.mode.upper()} | Keys: [{hw.key_map['belief']}]=BELIEF  [{hw.key_map['disbelief']}]=DISBELIEF  [{hw.key_map['suspend']}]=SUSPEND  [{hw.key_map['quit_key']}]=Quit")
+    print(
+        f"Trigger Mode: {hw.mode.upper()} | Jitter: {'ON (2.0-6.5s)' if use_jitter else 'OFF'} | "
+        f"Keys: [{hw.key_map['belief']}]=BELIEF  [{hw.key_map['disbelief']}]=DISBELIEF  "
+        f"[{hw.key_map['suspend']}]=SUSPEND  [{hw.key_map['quit_key']}]=Quit"
+    )
     print("=" * 72)
 
     if wait_for_scanner:
@@ -93,6 +94,10 @@ def run_cli_session(
             evidence = generate_trial_evidence(ambiguity, row["ground_truth_label"], rng)
 
             t_fix = hw.send_trigger("FIXATION_ONSET")
+            jitter_sec = sample_fixation_jitter(rng) if use_jitter else 0.0
+            if use_jitter:
+                time.sleep(jitter_sec)
+
             stim_onset = time.perf_counter() - run_start
             t_prop = hw.send_trigger("PROPOSITION_ONSET")
 
@@ -101,12 +106,16 @@ def run_cli_session(
             print(f"  Sample Cues : {evidence['cue_ratio_str']}")
 
             t0 = time.perf_counter()
-            raw = input(
-                f"  Your choice ([{hw.key_map['belief']}]=Belief, [{hw.key_map['disbelief']}]=Disbelief, [{hw.key_map['suspend']}]=Suspend, [{hw.key_map['quit_key']}]=Quit): "
-            )
+            choice = None
+            while choice is None:
+                raw = input(
+                    f"  Your choice ([{hw.key_map['belief']}]=Belief, [{hw.key_map['disbelief']}]=Disbelief, "
+                    f"[{hw.key_map['suspend']}]=Suspend, [{hw.key_map['quit_key']}]=Quit): "
+                )
+                choice = hw.translate_response(raw)
+
             rt_sec = time.perf_counter() - t0
 
-            choice = hw.translate_response(raw)
             if choice == "QUIT":
                 print("Session terminated early by user.")
                 break
@@ -132,6 +141,7 @@ def run_cli_session(
                 "payoff": payoff,
                 "ambiguity_level": round(ambiguity, 4),
                 "next_ambiguity_level": round(next_ambiguity, 4),
+                "fixation_jitter_s": round(jitter_sec, 4),
                 "trigger_codes": f"{t_fix},{t_prop},{t_resp},{t_fb}",
             })
     finally:
@@ -150,6 +160,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--config", type=str, default=None)
     parser.add_argument("--wait-scanner", action="store_true", help="Pause until scanner sync trigger arrives")
+    parser.add_argument("--jitter", action="store_true", help="Enable 2.0-6.5s exponential fixation jitter for fMRI/ASL")
     args = parser.parse_args()
 
     run_cli_session(
@@ -160,8 +171,10 @@ def main() -> None:
         seed=args.seed,
         config_path=args.config,
         wait_for_scanner=args.wait_scanner,
+        use_jitter=args.jitter,
     )
 
 
 if __name__ == "__main__":
     main()
+            
