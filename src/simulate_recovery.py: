@@ -1,0 +1,117 @@
+import argparse
+import numpy as np
+import pandas as pd
+from scipy.optimize import minimize
+
+try:
+    from src.tssm_model import (
+        COHORT_PROFILES,
+        TSSMParameters,
+        action_probabilities,
+        expected_free_energy,
+        hmm_stationary_distribution,
+    )
+except ImportError:
+    from tssm_model import (
+        COHORT_PROFILES,
+        TSSMParameters,
+        action_probabilities,
+        expected_free_energy,
+        hmm_stationary_distribution,
+    )
+
+
+def simulate_agent_trajectory(
+    params: TSSMParameters,
+    n_trials: int = 120,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """Simulates a synthetic TSSM v2.0 agent across an increasing executive cost load C."""
+    rng = np.random.default_rng(seed)
+    cost_loads = np.linspace(0.0, 1.0, n_trials)
+    records = []
+
+    # Candidate actions: [0: Passive Belief, 1: Active Disbelief, 2: Suspension of Judgment]
+    g_pragmatic = np.array([0.20, 0.35, 0.50])
+    g_epistemic = np.array([0.05, 0.45, 0.95])
+    policy_costs = np.array([0.05, 0.40, 0.90])
+    labels = ["BELIEF", "DISBELIEF", "SUSPEND"]
+
+    for t_idx, c_load in enumerate(cost_loads, start=1):
+        g_vals = expected_free_energy(
+            g_pragmatic=g_pragmatic,
+            g_epistemic=g_epistemic,
+            cost_load=float(c_load),
+            policy_cost=policy_costs,
+            params=params,
+        )
+        probs = action_probabilities(g_vals, cost_load=float(c_load), params=params)
+        choice_idx = int(rng.choice(len(labels), p=probs))
+        pi_pe, pi_sd = hmm_stationary_distribution(float(c_load), params)
+
+        records.append({
+            "trial": t_idx,
+            "cost_load": float(c_load),
+            "choice_idx": choice_idx,
+            "choice": labels[choice_idx],
+            "p_suspend": float(probs),
+            "hmm_pi_prefrontal": float(pi_pe),
+            "hmm_pi_subcortical": float(pi_sd),
+        })
+
+    return pd.DataFrame(records)
+
+
+def recover_parameters(df: pd.DataFrame, k0: float = 10.0) -> tuple[float, float]:
+    """Recovers latent (c_crit, effort_lambda) via Maximum Likelihood Estimation (MLE)."""
+    g_pragmatic = np.array([0.20, 0.35, 0.50])
+    g_epistemic = np.array([0.05, 0.45, 0.95])
+    policy_costs = np.array([0.05, 0.40, 0.90])
+
+    cost_loads = df["cost_load"].to_numpy()
+    choices = df["choice_idx"].to_numpy()
+
+    def neg_log_likelihood(theta: np.ndarray) -> float:
+        c_crit_hat, lam_hat = float(theta[0]), float(theta[1])
+        candidate = TSSMParameters(c_crit=c_crit_hat, effort_lambda=lam_hat, k0=k0)
+        nll = 0.0
+        for c_load, c_idx in zip(cost_loads, choices):
+            g_vals = expected_free_energy(g_pragmatic, g_epistemic, float(c_load), policy_costs, candidate)
+            probs = action_probabilities(g_vals, float(c_load), candidate)
+            nll -= np.log(max(float(probs[c_idx]), 1e-12))
+        return nll
+
+    res = minimize(
+        neg_log_likelihood,
+        x0=np.array([0.50, 2.50]),
+        bounds=[(0.05, 0.95), (0.20, 12.0)],
+        method="L-BFGS-B",
+    )
+    return float(res.x[0]), float(res.x[1])
+
+
+def run_recovery_benchmark(n_trials: int = 160, seed: int = 42) -> None:
+    """Runs end-to-end simulation and MLE parameter recovery across v2 clinical cohorts."""
+    print("=" * 84)
+    print("TSSM v2.0 END-TO-END COHORT SIMULATION & PARAMETER RECOVERY BENCHMARK")
+    print("=" * 84)
+
+    for idx, (cohort_name, true_params) in enumerate(COHORT_PROFILES.items()):
+        df = simulate_agent_trajectory(true_params, n_trials=n_trials, seed=seed + idx)
+        rec_c_crit, rec_lam = recover_parameters(df, k0=true_params.k0)
+        suspend_rate = (df["choice"] == "SUSPEND").mean() * 100.0
+        mean_pi_pe = df["hmm_pi_prefrontal"].mean()
+
+        print(
+            f"{cohort_name:<25} | True(C_crit={true_params.c_crit:.2f}, lam={true_params.effort_lambda:.1f}) -> "
+            f"Rec(C_crit={rec_c_crit:.2f}, lam={rec_lam:.1f}) | "
+            f"Suspend={suspend_rate:5.1f}% | Mean Pi_PE={mean_pi_pe:.3f}"
+        )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Run TSSM v2.0 parameter recovery benchmark.")
+    parser.add_argument("--trials", type=int, default=160, help="Number of simulated trials per cohort")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args = parser.parse_args()
+    run_recovery_benchmark(n_trials=args.trials, seed=args.seed)
