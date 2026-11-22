@@ -7,8 +7,7 @@ authors:
     given-names: "Ben"
     orcid: "https://orcid.org"
 repository-code: "https://github.com"
-doi: "10.5281/zenodo.24433515"
-version: "1.1.0"
+version: "1.1.2"
 date-released: "2026-11-22"
 license: "MIT"
 keywords:
@@ -20,3 +19,4 @@ keywords:
   - "BIDS"
   - "fMRI"
   - "EEG"
+
