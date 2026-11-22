@@ -5,9 +5,9 @@ import numpy as np
 
 @dataclass
 class TSSMParameters:
-    c_crit: float = 0.15
+    c_crit: float = 0.75
     effort_lambda: float = 1.0
-    k_steepness: float = 15.0
+    k0: float = 10.0
     tau_min: float = 0.01
     alpha_0: float = 0.05
     alpha_max: float = 0.95
@@ -15,11 +15,16 @@ class TSSMParameters:
     eta_biophys: float = 2.0e4
     phi_maint: float = 1.25
 
+    @property
+    def k_steepness(self) -> float:
+        """Coupled transition steepness k = k0 * lambda (Eq. 2)."""
+        return self.k0 * self.effort_lambda
+
 
 COHORT_PROFILES: Dict[str, TSSMParameters] = {
-    "healthy_control": TSSMParameters(c_crit=0.15, effort_lambda=1.0, k_steepness=15.0),
-    "clinical_burnout": TSSMParameters(c_crit=0.45, effort_lambda=3.5, k_steepness=18.0),
-    "major_depressive_disorder": TSSMParameters(c_crit=0.75, effort_lambda=8.0, k_steepness=22.0),
+    "healthy_control": TSSMParameters(c_crit=0.75, effort_lambda=1.0, k0=10.0),
+    "clinical_burnout": TSSMParameters(c_crit=0.45, effort_lambda=3.5, k0=10.0),
+    "major_depressive_disorder": TSSMParameters(c_crit=0.15, effort_lambda=8.0, k0=10.0),
 }
 
 
@@ -60,7 +65,7 @@ def hmm_transition_rates(
     cost_load: np.ndarray | float,
     params: TSSMParameters,
 ) -> Tuple[np.ndarray | float, np.ndarray | float]:
-    arg = np.clip(params.effort_lambda * (cost_load - params.c_crit), -60.0, 60.0)
+    arg = np.clip(params.k_steepness * (cost_load - params.c_crit), -60.0, 60.0)
     alpha_c = params.alpha_0 + (params.alpha_max - params.alpha_0) / (1.0 + np.exp(-arg))
     beta_c = params.beta_0 / (1.0 + np.exp(arg))
     return alpha_c, beta_c
@@ -73,4 +78,12 @@ def hmm_stationary_distribution(
     alpha_c, beta_c = hmm_transition_rates(cost_load, params)
     denom = alpha_c + beta_c
     return beta_c / denom, alpha_c / denom
-  
+
+
+def biophysical_energy_joules(
+    delta_info_nats: np.ndarray | float,
+    params: TSSMParameters,
+) -> np.ndarray | float:
+    """Macroscopic phenomenological ATP expenditure in Joules (Eq. 12)."""
+    return params.eta_biophys * params.phi_maint * delta_info_nats * 1e-19
+    
