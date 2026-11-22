@@ -1,0 +1,29 @@
+experiment:
+  name: "FCABP"
+  version: "1.1.0"
+  bids_root: "data"
+  initial_ambiguity: 0.45
+  n_cues: 10
+
+hardware:
+  # Options: "keyboard" (CLI/emulated scanner), "serial" (USB/COM TTL), "parallel"
+  trigger_mode: "keyboard"
+  scanner_sync_key: "5"
+  serial_port: "COM3"
+  baud_rate: 115200
+  pulse_duration_ms: 10
+
+response_pad:
+  belief: "1"
+  disbelief: "2"
+  suspend: "3"
+  quit_key: "q"
+
+ttl_codes:
+  FIXATION_ONSET: 10
+  PROPOSITION_ONSET: 20
+  RESP_BELIEF: 31
+  RESP_DISBELIEF: 32
+  RESP_SUSPEND: 33
+  FEEDBACK_ONSET: 40
+  
