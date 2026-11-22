@@ -3,7 +3,7 @@ message: "If you use this software, please cite it as below."
 authors:
   - family-names: Ruby
     given-names: Ben
-    orcid: https://orcid.org
+    orcid: 0009-0005-4568-8800
 title: "TSSM-FCABP: Forced-Choice Asymmetric Betting Paradigm and Thermodynamic State-Space Model"
 version: v1.1.4
 date-released: 2026-11-22
