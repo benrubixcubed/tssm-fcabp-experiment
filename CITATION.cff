@@ -1,16 +1,22 @@
 cff-version: 1.2.0
-message: "If you use this software, please cite it using the metadata from this file."
-title: "TSSM-FCABP: Forced-Choice Asymmetric Betting Paradigm"
+title: "TSSM-FCABP: Forced-Choice Asymmetric Betting Paradigm and Thermodynamic State-Space Model"
+message: "If you use this software, experimental paradigm, or neuroimaging protocol in your research, please cite both this software release and the accompanying theoretical paper."
+type: software
 authors:
-  - family-names: Ruby
-    given-names: Benjamin
-doi: 10.5281/zenodo.24433515
-version: v1.0.1
+  - family-names: "Ruby"
+    given-names: "Ben"
+    orcid: "https://orcid.org"
+repository-code: "https://github.com"
+doi: "10.5281/zenodo.24433515"
+version: "1.1.0"
+date-released: "2026-11-22"
 license: "MIT"
-preferred-citation:
-  type: article
-  authors:
-    - family-names: "Ruby"
-      given-names: "Ben"
-  title: "A Hierarchical Thermodynamic Taxonomy of Doxastic States: An Active Inference Model, Neuro-Computational Opportunity Cost Architecture, and EEG-fMRI Fusion Paradigm"
-  year: 2026
+keywords:
+  - "active inference"
+  - "neuroepistemology"
+  - "free energy principle"
+  - "doxastic states"
+  - "cognitive neuroscience"
+  - "BIDS"
+  - "fMRI"
+  - "EEG"
