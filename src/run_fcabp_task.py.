@@ -1,11 +1,17 @@
 import argparse
 import os
 import time
-from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from adaptive_staircase import AdaptiveStaircase
+try:
+    from src.adaptive_staircase import AdaptiveStaircase
+    from src.bids_logger import BIDSLogger
+    from src.hardware_interface import HardwareInterface
+except ImportError:
+    from adaptive_staircase import AdaptiveStaircase
+    from bids_logger import BIDSLogger
+    from hardware_interface import HardwareInterface
 
 
 TRIGGERS = {
@@ -43,82 +49,107 @@ def score_asymmetric_bet(choice: str, ground_truth: str, stake: int) -> tuple[bo
         payoff = int(round(0.4 * stake))
         return is_correct, payoff
 
-    is_correct = (choice == ground_truth)
+    is_correct = choice == ground_truth
     payoff = stake if is_correct else -(2 * stake)
     return is_correct, payoff
 
 
-def run_cli_session(subject: str, session: str, n_trials: int, out_dir: str, seed: int = 42):
+def run_cli_session(
+    subject: str,
+    session: str,
+    n_trials: int,
+    out_dir: str,
+    seed: int = 42,
+    config_path: str | None = None,
+    wait_for_scanner: bool = False,
+):
+    hw = HardwareInterface(config_path=config_path)
+    logger = BIDSLogger(out_dir=out_dir, subject=subject, session=session)
+
     rng = np.random.default_rng(seed)
     stim_path = os.path.join(os.path.dirname(__file__), "..", "stimuli", "proposition_bank.csv")
     stim_df = pd.read_csv(stim_path)
 
-    staircase = AdaptiveStaircase(initial_ambiguity=0.45)
-    os.makedirs(out_dir, exist_ok=True)
-    run_start = time.perf_counter()
-    records = []
+    staircase = AdaptiveStaircase(initial_ambiguity=float(hw.cfg["experiment"]["initial_ambiguity"]))
 
     print("=" * 72)
     print(f"TSSM-FCABP PROTOCOL | Subject: {subject} | Session: {session} | Trials: {n_trials}")
-    print("Keys: [1] BELIEF (Affirm)   [2] DISBELIEF (Reject)   [3] SUSPEND (Defer)   [q] Quit")
+    print(f"Trigger Mode: {hw.mode.upper()} | Keys: [{hw.key_map['belief']}]=BELIEF  [{hw.key_map['disbelief']}]=DISBELIEF  [{hw.key_map['suspend']}]=SUSPEND  [{hw.key_map['quit_key']}]=Quit")
     print("=" * 72)
 
-    key_map = {"1": "BELIEF", "2": "DISBELIEF", "3": "SUSPEND"}
+    if wait_for_scanner:
+        sync_key = str(hw.cfg["hardware"]["scanner_sync_key"])
+        while True:
+            pulse = input(f"Waiting for MRI scanner sync trigger ('{sync_key}')... ").strip()
+            if pulse == sync_key:
+                break
 
-    for t_idx in range(1, n_trials + 1):
-        row = stim_df.sample(n=1, random_state=int(rng.integers(0, 1_000_000))).iloc[0]
-        ambiguity = staircase.current_ambiguity
-        evidence = generate_trial_evidence(ambiguity, row["ground_truth_label"], rng)
+    run_start = time.perf_counter()
 
-        stim_onset = time.perf_counter() - run_start
-        print(f"\n[Trial {t_idx:02d}/{n_trials:02d}] Ambiguity={ambiguity:.2f} | Stake=±{row['pragmatic_stake']} pts")
-        print(f"  Proposition : {row['proposition_text']}")
-        print(f"  Sample Cues : {evidence['cue_ratio_str']}")
+    try:
+        for t_idx in range(1, n_trials + 1):
+            row = stim_df.sample(n=1, random_state=int(rng.integers(0, 1_000_000))).iloc[0]
+            ambiguity = staircase.current_ambiguity
+            evidence = generate_trial_evidence(ambiguity, row["ground_truth_label"], rng)
 
-        t0 = time.perf_counter()
-        raw = input("  Your choice ([1]=Belief, [2]=Disbelief, [3]=Suspend, [q]=Quit): ").strip().lower()
-        rt_sec = time.perf_counter() - t0
+            t_fix = hw.send_trigger("FIXATION_ONSET")
+            stim_onset = time.perf_counter() - run_start
+            t_prop = hw.send_trigger("PROPOSITION_ONSET")
 
-        if raw == "q":
-            print("Session terminated early by user.")
-            break
+            print(f"\n[Trial {t_idx:02d}/{n_trials:02d}] Ambiguity={ambiguity:.2f} | Stake=±{row['pragmatic_stake']} pts")
+            print(f"  Proposition : {row['proposition_text']}")
+            print(f"  Sample Cues : {evidence['cue_ratio_str']}")
 
-        choice = key_map.get(raw, "SUSPEND")
-        is_correct, payoff = score_asymmetric_bet(choice, row["ground_truth_label"], int(row["pragmatic_stake"]))
-        next_ambiguity = staircase.update(is_correct)
-        print(f"  -> Recorded: {choice} | RT={rt_sec*1000:.0f} ms | Payoff={payoff:+d} pts")
+            t0 = time.perf_counter()
+            raw = input(
+                f"  Your choice ([{hw.key_map['belief']}]=Belief, [{hw.key_map['disbelief']}]=Disbelief, [{hw.key_map['suspend']}]=Suspend, [{hw.key_map['quit_key']}]=Quit): "
+            )
+            rt_sec = time.perf_counter() - t0
 
-        records.append({
-            "onset": round(stim_onset, 4),
-            "duration": round(rt_sec, 4),
-            "trial_number": t_idx,
-            "stim_id": row["stim_id"],
-            "domain": row["domain"],
-            "ground_truth": row["ground_truth_label"],
-            "choice": choice,
-            "response_time_ms": round(rt_sec * 1000.0, 2),
-            "is_correct": int(is_correct),
-            "payoff": payoff,
-            "ambiguity_level": round(ambiguity, 4),
-            "next_ambiguity_level": round(next_ambiguity, 4),
-            "trigger_codes": f"{TRIGGERS['FIXATION_ONSET']},{TRIGGERS['PROPOSITION_ONSET']},{TRIGGERS[f'RESP_{choice}']},{TRIGGERS['FEEDBACK_ONSET']}",
-        })
+            choice = hw.translate_response(raw)
+            if choice == "QUIT":
+                print("Session terminated early by user.")
+                break
 
-    if records:
-        out_df = pd.DataFrame(records)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_file = os.path.join(out_dir, f"{subject}_{session}_task-FCABP_events_{timestamp}.tsv")
-        out_df.to_csv(out_file, sep="\t", index=False)
-        print(f"\n[Saved] BIDS-compatible event log written to: {out_file}")
+            t_resp = hw.send_trigger(f"RESP_{choice}")
+            is_correct, payoff = score_asymmetric_bet(choice, row["ground_truth_label"], int(row["pragmatic_stake"]))
+            next_ambiguity = staircase.update(is_correct)
+            t_fb = hw.send_trigger("FEEDBACK_ONSET")
+
+            print(f"  -> Recorded: {choice} | RT={rt_sec*1000:.0f} ms | Payoff={payoff:+d} pts")
+
+            logger.log_trial({
+                "onset": round(stim_onset, 4),
+                "duration": round(rt_sec, 4),
+                "trial_type": choice,
+                "trial_number": t_idx,
+                "stim_id": row["stim_id"],
+                "domain": row["domain"],
+                "ground_truth": row["ground_truth_label"],
+                "choice": choice,
+                "response_time_ms": round(rt_sec * 1000.0, 2),
+                "is_correct": int(is_correct),
+                "payoff": payoff,
+                "ambiguity_level": round(ambiguity, 4),
+                "next_ambiguity_level": round(next_ambiguity, 4),
+                "trigger_codes": f"{t_fix},{t_prop},{t_resp},{t_fb}",
+            })
+    finally:
+        out_file = logger.flush()
+        hw.close()
+        if out_file:
+            print(f"\n[Saved] BIDS-compliant event log + JSON sidecar written to: {out_file}")
 
 
-if __name__ == "__main__":
+def main() -> None:
     parser = argparse.ArgumentParser(description="Run the TSSM Forced-Choice Asymmetric Betting Paradigm (FCABP).")
     parser.add_argument("--subject", type=str, default="sub-01")
     parser.add_argument("--session", type=str, default="ses-01")
     parser.add_argument("--trials", type=int, default=12)
     parser.add_argument("--out-dir", type=str, default="data")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument("--wait-scanner", action="store_true", help="Pause until scanner sync trigger arrives")
     args = parser.parse_args()
 
     run_cli_session(
@@ -127,4 +158,10 @@ if __name__ == "__main__":
         n_trials=args.trials,
         out_dir=args.out_dir,
         seed=args.seed,
+        config_path=args.config,
+        wait_for_scanner=args.wait_scanner,
     )
+
+
+if __name__ == "__main__":
+    main()
