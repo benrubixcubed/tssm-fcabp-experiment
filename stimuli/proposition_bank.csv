@@ -1,0 +1,9 @@
+stim_id,domain,condition_type,base_ambiguity,proposition_text,ground_truth_label,pragmatic_stake
+P001,physical,entrenched_true,0.05,"Water boils at 100 degrees Celsius at standard sea-level atmospheric pressure.",BELIEF,10
+P002,physical,entrenched_false,0.05,"Solid iron floats effortlessly on top of pure liquid water at room temperature.",DISBELIEF,10
+P003,logical,entrenched_true,0.10,"If all mammals are warm-blooded and whales are mammals, then whales are warm-blooded.",BELIEF,10
+P004,logical,entrenched_false,0.10,"A triangle on a flat Euclidean plane can contain two interior angles of 100 degrees each.",DISBELIEF,10
+P005,probabilistic,moderate_ambiguity,0.45,"An urn contains 52 red balls and 48 blue balls; a single blind draw will yield a red ball.",BELIEF,15
+P006,probabilistic,moderate_ambiguity,0.50,"A fair coin flipped three times in a row will land on heads more often than tails.",SUSPEND,15
+P007,epistemic,high_ambiguity,0.75,"Sub-glacial liquid water oceans on Europa currently harbor chemosynthetic microbial life.",SUSPEND,20
+P008,epistemic,high_ambiguity,0.80,"A newly synthesized nootropic compound with 62% Phase-II response rate will pass Phase-III trials.",SUSPEND,20
